@@ -7,7 +7,7 @@ require Exporter;
 *import = \&Exporter::import;
 @EXPORT_OK=qw(dump pp);
 
-$VERSION = "0.03";  # $Date: 1999/08/04 23:02:10 $
+$VERSION = "0.04";  # $Date: 2000/09/11 16:02:11 $
 $DEBUG = 0;
 
 use overload ();
@@ -118,13 +118,13 @@ sub _dump
 	die "Can't parse " . overload::StrVal($rval);
     }
     warn "$name-(@$idx) $class $type $id ($ref)" if $DEBUG;
-    
+
     if (my $s = $seen{$id}) {
 	my($sname, $sidx) = @$s;
 	$refcnt{$sname}++;
-	my $sref = fullname($sname, $sidx);
+	my $sref = fullname($sname, $sidx,
+			    ($ref && $type eq "SCALAR"));
 	warn "SEEN: [$name/@$idx] => [$sname/@$sidx] ($ref,$sref)" if $DEBUG;
-	$sref = "\\$sref" if $ref && $type eq "SCALAR";
 	return $sref unless $sname eq $name;
 	$refcnt{$name}++;
 	push(@fixup, fullname($name,$idx)." = $sref");
@@ -133,7 +133,7 @@ sub _dump
     $seen{$id} = [$name, $idx];
 
     my $out;
-    if ($type eq "SCALAR") {
+    if ($type eq "SCALAR" || $type eq "REF") {
 	if ($ref) {
 	    delete $seen{$id};  # will be seen again shortly
 	    my $val = _dump($$rval, $name, [@$idx, "\$"]);
@@ -201,28 +201,59 @@ sub _dump
     }
     elsif ($type eq "HASH") {
 	my(@keys, @vals);
-	my $max_klen = 0;
+
+	# statistics to determine variation in key lengths
+	my $kstat_max = 0;
+	my $kstat_sum = 0;
+	my $kstat_sum2 = 0;
+
 	for my $key (sort keys %$rval) {
 	    my $val = \$rval->{$key};
-	    $key = quote($key) if $key !~ /^[a-zA-Z_]\w*$/ ||
-#		                  length($key) > 20        ||
+	    $key = quote($key) if $key !~ /^[a-zA-Z_]\w*\z/ ||
+		                  length($key) > 20        ||
 		                  $is_perl_keyword{$key};
-	    my $klen = length $key;
-	    $max_klen = $klen if $max_klen < $klen;
+
+	    $kstat_max = length($key) if length($key) > $kstat_max;
+	    $kstat_sum += length($key);
+	    $kstat_sum2 += length($key)*length($key);
+
 	    push(@keys, $key);
 	    push(@vals, _dump($$val, $name, [@$idx, "{$key}"]));
 	}
-	$max_klen = 15 if $max_klen > 15;
 	my $nl = "";
+	my $klen_pad = 0;
 	my $tmp = "@keys @vals";
-	$nl = "\n" if length($tmp) > 70 || $tmp =~ /\n/;
+	if (length($tmp) > 60 || $tmp =~ /\n/) {
+	    $nl = "\n";
+
+	    # Determine what padding to add
+	    if ($kstat_max < 4) {
+		$klen_pad = $kstat_max;
+	    }
+	    elsif (@keys >= 2) {
+		my $n = @keys;
+		my $avg = $kstat_sum/$n;
+		my $stddev = sqrt(($kstat_sum2 - $n * $avg * $avg) / ($n - 1));
+
+		# I am not actually very happy with this heuristics
+		if ($stddev / $kstat_max < 0.25) {
+		    $klen_pad = $kstat_max;
+		}
+		if ($DEBUG) {
+		    push(@keys, "__S");
+		    push(@vals, sprintf("%.2f (%d/%.1f/%.1f)",
+					$stddev / $kstat_max,
+					$kstat_max, $avg, $stddev));
+		}
+	    }
+	}
 	$out = "{$nl";
 	while (@keys) {
 	    my $key = shift @keys;
 	    my $val = shift @vals;
-	    my $pad = " " x ($max_klen + 6);
+	    my $pad = " " x ($klen_pad + 6);
 	    $val =~ s/\n/\n$pad/gm;
-	    $key = " $key" . " " x ($max_klen - length($key)) if $nl;
+	    $key = " $key" . " " x ($klen_pad - length($key)) if $nl;
 	    $out .= " $key => $val,$nl";
 	}
 	$out =~ s/,$/ / unless $nl;
@@ -244,15 +275,19 @@ sub _dump
 
 sub fullname
 {
-    my($name, $idx) = @_;
+    my($name, $idx, $ref) = @_;
     substr($name, 0, 0) = "\$";
 
     my @i = @$idx;  # need copy in order to not modify @$idx
+    if ($ref && @i && $i[0] eq "\$") {
+	shift(@i);  # remove one deref
+	$ref = 0;
+    }
     while (@i && $i[0] eq "\$") {
 	shift @i;
 	$name = "\$$name";
     }
-    
+
     my $last_was_index;
     for my $i (@i) {
 	if ($i eq "*" || $i eq "\$") {
@@ -266,6 +301,7 @@ sub fullname
 	    $name .= $i;
 	}
     }
+    $name = "\\$name" if $ref;
     $name;
 }
 
@@ -397,7 +433,7 @@ L<Data::Dumper>, L<Storable>
 The C<Data::Dump> module is written by Gisle Aas <gisle@aas.no>, based
 on C<Data::Dumper> by Gurusamy Sarathy <gsar@umich.edu>.
 
- Copyright 1998-1999 Gisle Aas.
+ Copyright 1998-2000 Gisle Aas.
  Copyright 1996-1998 Gurusamy Sarathy.
 
 This library is free software; you can redistribute it and/or
