@@ -7,7 +7,7 @@ require Exporter;
 *import = \&Exporter::import;
 @EXPORT_OK=qw(dump pp);
 
-$VERSION = "1.05";  # $Date: 2004/11/11 10:02:31 $
+$VERSION = "1.06";  # $Date: 2004/11/12 08:51:17 $
 $DEBUG = 0;
 
 use overload ();
@@ -231,7 +231,7 @@ sub _dump
     }
     elsif ($type eq "ARRAY") {
 	my @vals;
-	my $tied = tied_str(tied(%$rval));
+	my $tied = tied_str(tied(@$rval));
 	my $i = 0;
 	for my $v (@$rval) {
 	    push(@vals, _dump($v, $name, [@$idx, "[$i]"], $tied));
