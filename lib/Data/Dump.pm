@@ -7,7 +7,7 @@ require Exporter;
 *import = \&Exporter::import;
 @EXPORT_OK=qw(dump pp);
 
-$VERSION = "1.00";  # $Date: 2003/10/06 19:38:56 $
+$VERSION = "1.01";  # $Date: 2003/10/10 08:42:16 $
 $DEBUG = 0;
 
 use overload ();
@@ -137,8 +137,31 @@ sub _dump
 	if ($ref) {
 	    if ($class && $class eq "Regexp") {
 		my $v = "$rval";
-		$v =~ s,/,\\/,g;
-		$out = "qr/$v/";
+
+		my $mod = "";
+		if ($v =~ /^\(\?([msix-]+):([\x00-\xFF]*)\)\z/) {
+		    $mod = $1;
+		    $v = $2;
+		    $mod =~ s/-.*//;
+		}
+		
+		my $sep = '/';
+		my $sep_count = ($v =~ tr/\///);
+		if ($sep_count) {
+		    # see if we can find a better one
+		    for ('|', ',', ':', '#') {
+			my $c = eval "\$v =~ tr/\Q$_\E//";
+			#print "SEP $_ $c $sep_count\n";
+			if ($c < $sep_count) {
+			    $sep = $_;
+			    $sep_count = $c;
+			    last if $sep_count == 0;
+			}
+		    }
+		}
+		$v =~ s/\Q$sep\E/\\$sep/g;
+
+		$out = "qr$sep$v$sep$mod";
 		undef($class);
 	    }
 	    else {
