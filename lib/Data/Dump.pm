@@ -7,7 +7,7 @@ require Exporter;
 *import = \&Exporter::import;
 @EXPORT_OK=qw(dump pp);
 
-$VERSION = "1.04";  # $Date: 2004/11/05 12:03:00 $
+$VERSION = "1.05";  # $Date: 2004/11/11 10:02:31 $
 $DEBUG = 0;
 
 use overload ();
@@ -119,6 +119,9 @@ sub _dump
     } else {
 	die "Can't parse " . overload::StrVal($rval);
     }
+    if ($] < 5.008 && $type eq "SCALAR") {
+	$type = "REF" if $ref eq "REF";
+    }
     warn "\$$name(@$idx) $class $type $id ($ref)" if $DEBUG;
 
     unless ($dont_remember) {
@@ -127,10 +130,11 @@ sub _dump
 	    $refcnt{$sname}++;
 	    my $sref = fullname($sname, $sidx,
 				($ref && $type eq "SCALAR"));
-	    warn "SEEN: [$name/@$idx] => [$sname/@$sidx] ($ref,$sref)" if $DEBUG;
+	    warn "SEEN: [\$$name(@$idx)] => [\$$sname(@$sidx)] ($ref,$sref)" if $DEBUG;
 	    return $sref unless $sname eq $name;
 	    $refcnt{$name}++;
 	    push(@fixup, fullname($name,$idx)." = $sref");
+	    return "do{my \$fix}" if @$idx && $idx->[-1] eq '$';
 	    return "'fix'";
 	}
 	$seen{$id} = [$name, $idx];
@@ -169,7 +173,7 @@ sub _dump
 		undef($class);
 	    }
 	    else {
-		delete $seen{$id};  # will be seen again shortly
+		delete $seen{$id} if $type eq "SCALAR";  # will be seen again shortly
 		my $val = _dump($$rval, $name, [@$idx, "\$"]);
 		$out = $class ? "do{\\(my \$o = $val)}" : "\\$val";
 	    }
