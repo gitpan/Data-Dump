@@ -7,7 +7,7 @@ require Exporter;
 *import = \&Exporter::import;
 @EXPORT_OK=qw(dump pp);
 
-$VERSION = "0.04";  # $Date: 2000/09/11 16:02:11 $
+$VERSION = "1.00";  # $Date: 2003/10/06 19:38:56 $
 $DEBUG = 0;
 
 use overload ();
@@ -135,9 +135,17 @@ sub _dump
     my $out;
     if ($type eq "SCALAR" || $type eq "REF") {
 	if ($ref) {
-	    delete $seen{$id};  # will be seen again shortly
-	    my $val = _dump($$rval, $name, [@$idx, "\$"]);
-	    $out = $class ? "do{\\(my \$o = $val)}" : "\\$val";
+	    if ($class && $class eq "Regexp") {
+		my $v = "$rval";
+		$v =~ s,/,\\/,g;
+		$out = "qr/$v/";
+		undef($class);
+	    }
+	    else {
+		delete $seen{$id};  # will be seen again shortly
+		my $val = _dump($$rval, $name, [@$idx, "\$"]);
+		$out = $class ? "do{\\(my \$o = $val)}" : "\\$val";
+	    }
 	} else {
 	    if (!defined $$rval) {
 		$out = "undef";
@@ -207,11 +215,25 @@ sub _dump
 	my $kstat_sum = 0;
 	my $kstat_sum2 = 0;
 
-	for my $key (sort keys %$rval) {
+	my @orig_keys = keys %$rval;
+	my $text_keys = 0;
+	for (@orig_keys) {
+	    $text_keys++, last unless $_ eq "0" || /^[-+]?[1-9]\d*(?:.\d+)?\z/;
+	}
+
+	if ($text_keys) {
+	    @orig_keys = sort @orig_keys;
+	}
+	else {
+	    @orig_keys = sort { $a <=> $b } @orig_keys;
+	}
+
+	for my $key (@orig_keys) {
 	    my $val = \$rval->{$key};
-	    $key = quote($key) if $key !~ /^[a-zA-Z_]\w*\z/ ||
-		                  length($key) > 20        ||
-		                  $is_perl_keyword{$key};
+	    $key = quote($key) if $is_perl_keyword{$key} ||
+		                  !($key =~ /^[a-zA-Z_]\w{0,19}\z/ ||
+				    $key =~ /^-?[1-9]\d{0,8}\z/
+				    );
 
 	    $kstat_max = length($key) if length($key) > $kstat_max;
 	    $kstat_sum += length($key);
@@ -433,7 +455,7 @@ L<Data::Dumper>, L<Storable>
 The C<Data::Dump> module is written by Gisle Aas <gisle@aas.no>, based
 on C<Data::Dumper> by Gurusamy Sarathy <gsar@umich.edu>.
 
- Copyright 1998-2000 Gisle Aas.
+ Copyright 1998-2000,2003 Gisle Aas.
  Copyright 1996-1998 Gurusamy Sarathy.
 
 This library is free software; you can redistribute it and/or
