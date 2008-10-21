@@ -9,7 +9,7 @@ require Exporter;
 @EXPORT = qw(dd ddx);
 @EXPORT_OK = qw(dump pp quote);
 
-$VERSION = "1.11";
+$VERSION = "1.12";
 $DEBUG = 0;
 
 use overload ();
@@ -535,7 +535,7 @@ semicolon in the expected place:
 
 If dump() is called in void context, then the dump is printed on
 STDERR and then "\n" terminated.  You might find this useful for quick
-debug printouts, but the dd*() functions might be a better alternative
+debug printouts, but the dd*() functions might be better alternatives
 for this.
 
 There is no difference between dump() and pp(), except that dump()
@@ -554,7 +554,7 @@ output.
 
 =item ddx( ... )
 
-These functions will call dump() on on their argument and print the
+These functions will call dump() on their argument and print the
 result to STDOUT (actually, it's the currently selected output handle, but
 STDOUT is the default for that).
 
