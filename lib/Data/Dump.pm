@@ -9,7 +9,7 @@ require Exporter;
 @EXPORT = qw(dd ddx);
 @EXPORT_OK = qw(dump pp quote);
 
-$VERSION = "1.14";
+$VERSION = "1.15";
 $DEBUG = 0;
 
 use overload ();
@@ -258,7 +258,7 @@ sub _dump
 	my @orig_keys = keys %$rval;
 	my $text_keys = 0;
 	for (@orig_keys) {
-	    $text_keys++, last unless $_ eq "0" || /^[-+]?[1-9]\d*(?:.\d+)?\z/;
+	    $text_keys++, last unless /^[-+]?(?:0|[1-9]\d*)(?:\.\d+)?\z/;
 	}
 
 	if ($text_keys) {
