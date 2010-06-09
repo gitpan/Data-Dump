@@ -7,43 +7,15 @@ use subs qq(dump);
 require Exporter;
 *import = \&Exporter::import;
 @EXPORT = qw(dd ddx);
-@EXPORT_OK = qw(dump pp quote);
+@EXPORT_OK = qw(dump pp dumpf quote);
 
-$VERSION = "1.15";
+$VERSION = "1.16";
 $DEBUG = 0;
 
 use overload ();
-use vars qw(%seen %refcnt @dump @fixup %require $TRY_BASE64);
+use vars qw(%seen %refcnt @dump @fixup %require $TRY_BASE64 @FILTERS);
 
 $TRY_BASE64 = 50 unless defined $TRY_BASE64;
-
-my %is_perl_keyword = map { $_ => 1 }
-qw( __FILE__ __LINE__ __PACKAGE__ __DATA__ __END__ AUTOLOAD BEGIN CORE
-DESTROY END EQ GE GT INIT LE LT NE abs accept alarm and atan2 bind
-binmode bless caller chdir chmod chomp chop chown chr chroot close
-closedir cmp connect continue cos crypt dbmclose dbmopen defined
-delete die do dump each else elsif endgrent endhostent endnetent
-endprotoent endpwent endservent eof eq eval exec exists exit exp fcntl
-fileno flock for foreach fork format formline ge getc getgrent
-getgrgid getgrnam gethostbyaddr gethostbyname gethostent getlogin
-getnetbyaddr getnetbyname getnetent getpeername getpgrp getppid
-getpriority getprotobyname getprotobynumber getprotoent getpwent
-getpwnam getpwuid getservbyname getservbyport getservent getsockname
-getsockopt glob gmtime goto grep gt hex if index int ioctl join keys
-kill last lc lcfirst le length link listen local localtime lock log
-lstat lt m map mkdir msgctl msgget msgrcv msgsnd my ne next no not oct
-open opendir or ord pack package pipe pop pos print printf prototype
-push q qq qr quotemeta qw qx rand read readdir readline readlink
-readpipe recv redo ref rename require reset return reverse rewinddir
-rindex rmdir s scalar seek seekdir select semctl semget semop send
-setgrent sethostent setnetent setpgrp setpriority setprotoent setpwent
-setservent setsockopt shift shmctl shmget shmread shmwrite shutdown
-sin sleep socket socketpair sort splice split sprintf sqrt srand stat
-study sub substr symlink syscall sysopen sysread sysseek system
-syswrite tell telldir tie tied time times tr truncate uc ucfirst umask
-undef unless unlink unpack unshift untie until use utime values vec
-wait waitpid wantarray warn while write x xor y);
-
 
 sub dump
 {
@@ -51,6 +23,8 @@ sub dump
     local %refcnt;
     local %require;
     local @fixup;
+
+    require Data::Dump::FilterContext if @FILTERS;
 
     my $name = "a";
     my @dump;
@@ -117,13 +91,18 @@ sub ddx {
     print $out;
 }
 
+sub dumpf {
+    require Data::Dump::Filtered;
+    goto &Data::Dump::Filtered::dump_filtered;
+}
+
 sub _dump
 {
     my $ref  = ref $_[0];
     my $rval = $ref ? $_[0] : \$_[0];
     shift;
 
-    my($name, $idx, $dont_remember) = @_;
+    my($name, $idx, $dont_remember, $pclass, $pidx) = @_;
 
     my($class, $type, $id);
     if (overload::StrVal($rval) =~ /^(?:([^=]+)=)?([A-Z]+)\(0x([^\)]+)\)$/) {
@@ -137,6 +116,50 @@ sub _dump
 	$type = "REF" if $ref eq "REF";
     }
     warn "\$$name(@$idx) $class $type $id ($ref)" if $DEBUG;
+
+    my $out;
+    my $comment;
+    my $hide_keys;
+    if (@FILTERS) {
+	my $pself = "";
+	$pself = fullname("self", [@$idx[$pidx..(@$idx - 1)]]) if $pclass;
+	my $ctx = Data::Dump::FilterContext->new($rval, $class, $type, $ref, $pclass, $pidx, $idx);
+	my @bless;
+	for my $filter (@FILTERS) {
+	    if (my $f = $filter->($ctx, $rval)) {
+		if (my $v = $f->{object}) {
+		    local @FILTERS;
+		    $out = _dump($v, $name, $idx, 1);
+		    $dont_remember++;
+		}
+		if (defined(my $c = $f->{bless})) {
+		    push(@bless, $c);
+		}
+		if (my $c = $f->{comment}) {
+		    $comment = $c;
+		}
+		if (defined(my $c = $f->{dump})) {
+		    $out = $c;
+		    $dont_remember++;
+		}
+		if (my $h = $f->{hide_keys}) {
+		    if (ref($h) eq "ARRAY") {
+			$hide_keys = sub {
+			    for my $k (@$h) {
+				return 1 if $k eq $_[0];
+			    }
+			    return 0;
+			};
+		    }
+		}
+	    }
+	}
+	push(@bless, "") if defined($out) && !@bless;
+	if (@bless) {
+	    $class = shift(@bless);
+	    warn "More than one filter callback tried to bless object" if @bless;
+	}
+    }
 
     unless ($dont_remember) {
 	if (my $s = $seen{$id}) {
@@ -154,8 +177,15 @@ sub _dump
 	$seen{$id} = [$name, $idx];
     }
 
-    my $out;
-    if ($type eq "SCALAR" || $type eq "REF" || $type eq "REGEXP") {
+    if ($class) {
+	$pclass = $class;
+	$pidx = @$idx;
+    }
+
+    if (defined $out) {
+	# keep it
+    }
+    elsif ($type eq "SCALAR" || $type eq "REF" || $type eq "REGEXP") {
 	if ($ref) {
 	    if ($class && $class eq "Regexp") {
 		my $v = "$rval";
@@ -188,7 +218,7 @@ sub _dump
 	    }
 	    else {
 		delete $seen{$id} if $type eq "SCALAR";  # will be seen again shortly
-		my $val = _dump($$rval, $name, [@$idx, "\$"]);
+		my $val = _dump($$rval, $name, [@$idx, "\$"], 0, $pclass, $pidx);
 		$out = $class ? "do{\\(my \$o = $val)}" : "\\$val";
 	    }
 	} else {
@@ -213,7 +243,7 @@ sub _dump
     elsif ($type eq "GLOB") {
 	if ($ref) {
 	    delete $seen{$id};
-	    my $val = _dump($$rval, $name, [@$idx, "*"]);
+	    my $val = _dump($$rval, $name, [@$idx, "*"], 0, $pclass, $pidx);
 	    $out = "\\$val";
 	    if ($out =~ /^\\\*Symbol::/) {
 		$require{Symbol}++;
@@ -229,7 +259,7 @@ sub _dump
 		next if $k eq "SCALAR" && ! defined $$gval;  # always there
 		my $f = scalar @fixup;
 		push(@fixup, "RESERVED");  # overwritten after _dump() below
-		$gval = _dump($gval, $name, [@$idx, "*{$k}"]);
+		$gval = _dump($gval, $name, [@$idx, "*{$k}"], 0, $pclass, $pidx);
 		$refcnt{$name}++;
 		my $gname = fullname($name, $idx);
 		$fixup[$f] = "$gname = $gval";  #XXX indent $gval
@@ -241,7 +271,7 @@ sub _dump
 	my $tied = tied_str(tied(@$rval));
 	my $i = 0;
 	for my $v (@$rval) {
-	    push(@vals, _dump($v, $name, [@$idx, "[$i]"], $tied));
+	    push(@vals, _dump($v, $name, [@$idx, "[$i]"], $tied, $pclass, $pidx));
 	    $i++;
 	}
 	$out = "[" . format_list(1, $tied, @vals) . "]";
@@ -256,31 +286,38 @@ sub _dump
 	my $kstat_sum2 = 0;
 
 	my @orig_keys = keys %$rval;
+	if ($hide_keys) {
+	    @orig_keys = grep !$hide_keys->($_), @orig_keys;
+	}
 	my $text_keys = 0;
 	for (@orig_keys) {
 	    $text_keys++, last unless /^[-+]?(?:0|[1-9]\d*)(?:\.\d+)?\z/;
 	}
 
 	if ($text_keys) {
-	    @orig_keys = sort @orig_keys;
+	    @orig_keys = sort { lc($a) cmp lc($b) } @orig_keys;
 	}
 	else {
 	    @orig_keys = sort { $a <=> $b } @orig_keys;
 	}
 
+	my $quote;
 	for my $key (@orig_keys) {
-	    my $val = \$rval->{$key};
-	    $key = quote($key) if $is_perl_keyword{$key} ||
-		                  !($key =~ /^[a-zA-Z_]\w{0,19}\z/ ||
-				    $key =~ /^-?[1-9]\d{0,8}\z/
-				    );
+	    next if $key =~ /^-?[a-zA-Z_]\w*\z/;
+	    next if $key =~ /^-?[1-9]\d{0,8}\z/;
+	    $quote++;
+	    last;
+	}
 
+	for my $key (@orig_keys) {
+	    my $val = \$rval->{$key};  # capture value before we modify $key
+	    $key = quote($key) if $quote;
 	    $kstat_max = length($key) if length($key) > $kstat_max;
 	    $kstat_sum += length($key);
 	    $kstat_sum2 += length($key)*length($key);
 
 	    push(@keys, $key);
-	    push(@vals, _dump($$val, $name, [@$idx, "{$key}"], $tied));
+	    push(@vals, _dump($$val, $name, [@$idx, "{$key}"], $tied, $pclass, $pidx));
 	}
 	my $nl = "";
 	my $klen_pad = 0;
@@ -332,6 +369,12 @@ sub _dump
 
     if ($class && $ref) {
 	$out = "bless($out, " . quote($class) . ")";
+    }
+    if ($comment) {
+	$comment =~ s/^/# /gm;
+	$comment .= "\n" unless $comment =~ /\n\z/;
+	$comment =~ s/^#[ \t]+\n/\n/;
+	$out = "$comment$out";
     }
     return $out;
 }
@@ -563,6 +606,10 @@ it prints with "# " and mark the first line with the file and line
 number where it was called.  This is meant to be useful for debug
 printouts of state within programs.
 
+=item dumpf( ..., \&filter )
+
+Short hand for the dump_filtered() function of L<Data::Dump::Filtered>.
+
 =back
 
 
@@ -599,7 +646,7 @@ L<Data::Dumper>, L<Storable>
 The C<Data::Dump> module is written by Gisle Aas <gisle@aas.no>, based
 on C<Data::Dumper> by Gurusamy Sarathy <gsar@umich.edu>.
 
- Copyright 1998-2000,2003-2004,2008 Gisle Aas.
+ Copyright 1998-2010 Gisle Aas.
  Copyright 1996-1998 Gurusamy Sarathy.
 
 This library is free software; you can redistribute it and/or
