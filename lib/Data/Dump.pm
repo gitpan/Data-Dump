@@ -9,7 +9,7 @@ require Exporter;
 @EXPORT = qw(dd ddx);
 @EXPORT_OK = qw(dump pp dumpf quote);
 
-$VERSION = "1.17";
+$VERSION = "1.18";
 $DEBUG = 0;
 
 use overload ();
@@ -192,7 +192,7 @@ sub _dump
 		my $v = "$rval";
 
 		my $mod = "";
-		if ($v =~ /^\(\?([msix-]+):([\x00-\xFF]*)\)\z/) {
+		if ($v =~ /^\(\?\^?([msix-]*):([\x00-\xFF]*)\)\z/) {
 		    $mod = $1;
 		    $v = $2;
 		    $mod =~ s/-.*//;
@@ -364,6 +364,9 @@ sub _dump
     elsif ($type eq "CODE") {
 	$out = 'sub { ... }';
     }
+    elsif ($type eq "VSTRING") {
+        $out = sprintf +($ref ? '\v%vd' : 'v%vd'), $$rval;
+    }
     else {
 	warn "Can't handle $type data";
 	$out = "'#$type#'";
@@ -501,6 +504,7 @@ sub str {
       # 17 bytes (not counting any require statement needed).
       # But on the other hand, hex is much more readable.
       if ($TRY_BASE64 && length($_[0]) > $TRY_BASE64 &&
+	  (defined &utf8::is_utf8 && !utf8::is_utf8($_[0])) &&
 	  eval { require MIME::Base64 })
       {
 	  $require{"MIME::Base64"}++;

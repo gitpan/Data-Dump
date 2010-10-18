@@ -19,4 +19,5 @@ t/regexp.t
 t/scalar-obj.t
 t/scalar.t
 t/tied.t
+t/vstring.t
 META.yml                                 Module meta-data (added by MakeMaker)
