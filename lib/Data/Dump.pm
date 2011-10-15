@@ -9,7 +9,7 @@ require Exporter;
 @EXPORT = qw(dd ddx);
 @EXPORT_OK = qw(dump pp dumpf quote);
 
-$VERSION = "1.20";
+$VERSION = "1.21";
 $DEBUG = 0;
 
 use overload ();
@@ -232,7 +232,7 @@ sub _dump
 	    if (!defined $$rval) {
 		$out = "undef";
 	    }
-	    elsif ($$rval =~ /^-?[1-9]\d{0,9}\z/ || $$rval eq "0") {
+	    elsif (do {no warnings 'numeric'; $$rval + 0 eq $$rval}) {
 		$out = $$rval;
 	    }
 	    else {
