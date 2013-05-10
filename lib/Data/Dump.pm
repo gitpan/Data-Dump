@@ -9,7 +9,7 @@ require Exporter;
 @EXPORT = qw(dd ddx);
 @EXPORT_OK = qw(dump pp dumpf quote);
 
-$VERSION = "1.21";
+$VERSION = "1.22";
 $DEBUG = 0;
 
 use overload ();
@@ -71,9 +71,6 @@ sub dump
 	$out = "do {\n$out}";
     }
 
-    #use Data::Dumper;   print Dumper(\%refcnt);
-    #use Data::Dumper;   print Dumper(\%seen);
-
     print STDERR "$out\n" unless defined wantarray;
     $out;
 }
@@ -108,7 +105,7 @@ sub _dump
     my($class, $type, $id);
     my $strval = overload::StrVal($rval);
     # Parse $strval without using regexps, in order not to clobber $1, $2,...
-    if ((my $i = index($strval, "=")) >= 0) {
+    if ((my $i = rindex($strval, "=")) >= 0) {
 	$class = substr($strval, 0, $i);
 	$strval = substr($strval, $i+1);
     }
